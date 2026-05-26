@@ -1,0 +1,11 @@
+LogSyn/
+example/
+build/
+bin/
+*.o
+*.exe
+.vscode/
+.idea/
+CMakeCache.txt
+CMakeFiles/
+Makefile
