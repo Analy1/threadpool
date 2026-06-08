@@ -23,23 +23,23 @@ namespace tulun
         using Task = std::function<void(void)>;
 
     private:
-        size_t m_numThreads; // 线程数量
-        tulun::WSyncQueue<Task> m_queue;// 工作窃取任务队列（内部有多个子队列）
-        std::vector<std::shared_ptr<std::thread>> m_threadgroup;// 线程列表
+        size_t m_numThreads;                                     // 线程数量
+        tulun::WSyncQueue<Task> m_queue;                         // 工作窃取任务队列（内部有多个子队列）
+        std::vector<std::shared_ptr<std::thread>> m_threadgroup; // 线程列表
         std::atomic<bool> m_running;
         std::once_flag m_flag;
+        std::atomic<size_t> m_nextIndex{0};
 
         // 轮询选择下一个线程的队列（简单取模轮转）
         size_t threadIndex()
         {
-            static size_t num = 0;
-            return num++ % m_numThreads;
+            return m_nextIndex.fetch_add(1, std::memory_order_relaxed) % m_numThreads;
         }
 
         // 启动线程池，创建 numthreads 个工作线程
         void Start(int numthreads)
         {
-            m_running = true;
+            m_running.store(true);
             for (int i = 0; i < numthreads; ++i)
             {
                 // 创建线程，传入线程索引 i
@@ -51,49 +51,54 @@ namespace tulun
 
         // 工作线程的主循环函数
         // index：当前线程的编号，对应自己的专属队列
-        void RunInThread(const size_t index)
-        {
-            while (m_running)
-            {
-                std::deque<Task> taskque;  // 批量取任务的容器
-                // dbg;
-                m_queue.PrintTaskInfo(); // 调试输出：打印各队列任务数
+        // 工作线程的主循环函数
+// index：当前线程的编号，对应自己的专属队列
+void RunInThread(const size_t index)
+{
+    while (m_running.load())
+    {
+        Task task;  // 单个任务
 
-                // 第一步：尝试从自己的队列取任务
-                if (m_queue.Take(taskque, index) == 0)
+        // 第一步：尝试从自己的队列取任务
+        if (m_queue.Take(task, index) == 0)
+        {
+            if (task)
+            {
+                task();
+            }
+        }
+        else
+        {
+            // 第二步：自己的队列空了，尝试偷别人的任务（遍历所有其他线程）
+            bool stolen = false;
+            for (size_t offset = 1; offset < m_numThreads; ++offset)
+            {
+                size_t victim = (index + offset) % m_numThreads;  // 轮询选择受害者
+                if (m_queue.Take(task, victim) == 0)
                 {
-                     // 取到了，批量执行
-                    for (auto &task : taskque)
+                    if (task)
                     {
-                        if (task)
-                        {
-                            task();
-                        }
-                    }
-                }
-                else
-                {
-                     // 第二步：自己的队列空了，尝试偷别人的任务
-                    size_t i = threadIndex(); // 随机选一个其他线程
-                    if (i != index && m_queue.Take(taskque, i) == 0)
-                    {
-                        for (auto &task : taskque)
-                        {
-                            if (task)
-                            {
-                                task();
-                            }
-                        }
+                        task();
+                        stolen = true;
+                        break;  // 偷到一个就执行，然后继续下一轮循环
                     }
                 }
             }
+            
+            // 如果所有队列都空，让出 CPU 避免空转
+            if (!stolen)
+            {
+                std::this_thread::yield();
+            }
         }
+    }
+}
 
         // 停止所有线程
         void StopThreadGroup()
         {
-            m_queue.WaitStop();// 等待所有队列为空
-            m_running = false;
+            m_queue.WaitStop(); // 等待所有队列为空
+            m_running.store(false);
             for (auto &tha : m_threadgroup)
             {
                 if (tha && tha->joinable())
@@ -117,7 +122,7 @@ namespace tulun
         }
         ~WorkStealingThreadPool()
         {
-            if (m_running)
+            if (m_running.load())
             {
                 Stop();
             }
