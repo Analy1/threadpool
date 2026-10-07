@@ -13,3 +13,4 @@ perf-out/
 perf.data*
 gmon.out
 .zcode/
+scripts/
