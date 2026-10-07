@@ -75,7 +75,7 @@
 - **8 线程**：工作窃取池 65,448 tasks/s，比固定池 45,767 高 **43%**；相对 1 线程的加速比分别为 **6.15×**
   与 **4.40×**。固定池是共享队列 + 每次入队 `notify_all` 唤醒全部消费者，线程越多锁竞争越重，扩展性明显更差。
 - **4 线程及以下**：三者差距不大（33k / 38k / 39k），锁竞争还没成为主要瓶颈。
-- 可一键复现：`cmake -S . -B build && cmake --build build -j && taskset -c 0-7 ./bin/throughput 8`
+- 可一键复现：`bash bench/run_all.sh`（自动构建并跑完五个压测程序，默认 8 线程；`THREADS=4 bash bench/run_all.sh` 可换线程数）
 
 > 其它指标由 `bench/` 下的另外四个文件分别测量，每个文件一个指标、可单独编译运行：
 > [idle.cpp](bench/idle.cpp)（空闲唤醒次数与 CPU 开销）、[unbalanced.cpp](bench/unbalanced.cpp)（长任务扎堆）、
