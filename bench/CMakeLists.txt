@@ -24,6 +24,15 @@ add_executable(unbalanced
 target_link_libraries(unbalanced pthread)
 target_compile_options(unbalanced PRIVATE -O2)
 
+# 不均衡负载（随机版）：长任务随机分散到各队列，和上面的集中版配成一组对照
+add_executable(unbalanced_random
+    unbalanced_random.cpp
+    ${SRC_LOG}
+    ${SRC_ThrPool}
+)
+target_link_libraries(unbalanced_random pthread)
+target_compile_options(unbalanced_random PRIVATE -O2)
+
 add_executable(submit
     submit.cpp
     ${SRC_LOG}
