@@ -77,8 +77,9 @@
 - **4 线程及以下**：三者差距不大（33k / 38k / 39k），锁竞争还没成为主要瓶颈。
 - 可一键复现：`cmake -S . -B build && cmake --build build -j && taskset -c 0-7 ./bin/throughput 8`
 
-> 其他指标（空闲唤醒开销、长任务扎堆、提交路径开销、定时器精度）待按同样「一个文件测一个指标」的方式
-> 逐个补上，详见 [bench/README.md](bench/README.md)。
+> 其它指标由 `bench/` 下的另外四个文件分别测量，每个文件一个指标、可单独编译运行：
+> [idle.cpp](bench/idle.cpp)（空闲唤醒次数与 CPU 开销）、[unbalanced.cpp](bench/unbalanced.cpp)（长任务扎堆）、
+> [submit.cpp](bench/submit.cpp)（提交路径开销）、[timer.cpp](bench/timer.cpp)（定时器精度与创建开销）。
 
 ## 架构
 
