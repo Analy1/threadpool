@@ -156,6 +156,33 @@ namespace tulun
             return 0;
         }
 
+        // 属主取任务：从队尾取（后进先出）。
+        // 配合"生产者 push_back 进队尾、小偷 Take 从队首偷"，属主和小偷分别动 deque 的两端：
+        //   • 属主取的是自己队列里最新的任务（也就是它接下来要执行的那个），小偷抢不走属主的热任务；
+        //   • 两端落在不同的内存块/缓存行上，减少同一块数据上来回争用。
+        // 注意：每个桶仍然只有一把锁，所以锁本身的争用不会因为换端而下降 ——
+        // 换端换来的是局部性，以及"属主 LIFO、小偷 FIFO"（小偷倾向拿走最老的任务）。
+        // 返回值与 Take 一致：0 = 取到任务，1 = 已停止，2 = 队列为空（等待超时）
+        int TakeBack(T &task, const size_t index)
+        {
+            auto &bucket = m_taskQueues[index];
+            std::unique_lock<std::mutex> locker(bucket->mutex);
+            bool waitret = bucket->notEmpty.wait_for(locker,
+                                                    std::chrono::milliseconds(m_waitTime),
+                                                    [this, &bucket]()
+                                                    {
+                                                        return m_needStop.load() || !bucket->queue.empty();
+                                                    });
+            if (m_needStop.load())
+                return 1; // 如果需要停止了，就不获取任务了
+            if (!waitret)
+                return 2; // 获取任务超时
+            task = bucket->queue.back();
+            bucket->queue.pop_back();
+            bucket->notFull.notify_one(); // 取出任务腾出了空间，叫醒可能正在等待的生产者
+            return 0;
+        }
+
         // 重写 WaitStop（不用全局锁）
         void WaitStop()
         {

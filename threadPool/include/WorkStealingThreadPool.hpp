@@ -60,7 +60,9 @@ void RunInThread(const size_t index)
         Task task;  // 单个任务
 
         // 第一步：尝试从自己的队列取任务
-        if (m_queue.Take(task, index) == 0)
+        // 属主从队尾取（TakeBack），小偷从队首取（Take）—— 两者分别动 deque 的两端，
+        // 属主的热任务不会被偷走，也减少了同端数据上的争用。
+        if (m_queue.TakeBack(task, index) == 0)
         {
             if (task)
             {
