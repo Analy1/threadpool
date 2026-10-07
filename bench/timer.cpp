@@ -164,9 +164,12 @@ int main()
     {
         intervalErrUs.push_back(fireUs[i] - fireUs[i - 1] - targetUs);
     }
+    // 平均间隔偏差 = 相邻两次触发的平均间隔 - 目标间隔
     const double driftUs = fireUs.size() >= 2
                                ? (fireUs.back() - fireUs.front()) / static_cast<double>(fireUs.size() - 1) - targetUs
                                : 0.0;
+    // 观察期内的累计偏差 = 平均间隔偏差 × 间隔数
+    const double totalDriftUs = driftUs * static_cast<double>(fireUs.size() - 1);
 
     // ---------- 打印 ----------
     std::printf("创建定时器：%8.1f µs/个（%d 个共 %.1f ms）\n", createNs / 1000.0, kTimers, createAllMs);
@@ -182,8 +185,10 @@ int main()
                 fireUs.size());
     std::printf("  间隔误差： P50 %8.1f µs    P99 %8.1f µs    最大 %8.1f µs\n", percentile(intervalErrUs, 50),
                 percentile(intervalErrUs, 99), maxOf(intervalErrUs));
-    std::printf("  长期漂移： %+8.1f µs（平均每次触发偏 %+.2f µs）\n", driftUs,
-                fireUs.size() >= 2 ? driftUs / static_cast<double>(fireUs.size() - 1) : 0.0);
+    std::printf("  平均间隔偏差： %+8.1f µs（占目标间隔 %lld ms 的 %+.2f%%）\n", driftUs, kIntervalMs,
+                targetUs > 0 ? driftUs / targetUs * 100.0 : 0.0);
+    std::printf("  观察期内累计偏差： %+8.1f µs（共 %zu 次触发）\n", totalDriftUs, fireUs.size());
+    std::printf("  注意：均值/累计值会被少数几次调度停顿拉高，判断「每次准不准」要看上面的 P50\n");
 
     return 0;
 }
