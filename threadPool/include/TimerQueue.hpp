@@ -4,6 +4,7 @@
 #include <thread>               
 #include <atomic>              
 #include <mutex>               
+#include <memory>               
 #include "Logger.hpp"
 #include "Timestamp.hpp"
 #include "Timer.hpp"
@@ -23,12 +24,18 @@ namespace tulun
 
     private:
         int m_epollfd;         // epoll 实例的文件描述符
+        int m_wakeupfd;        // eventfd：stop 时写入，用于唤醒阻塞在 epoll_wait 的 loop 线程
         int m_timeout;         // epoll_wait 的超时时间（毫秒）
                                // -1 = 无限等待，直到有事件
 
         std::vector<struct epoll_event> m_events;   // epoll_wait 返回的事件数组
-        std::unordered_map<int, Timer*> m_timers;   // fd → Timer* 映射表
-                                                    // 通过 fd 快速找到对应的 Timer 对象
+
+        std::unordered_map<int, std::shared_ptr<Timer>> m_timers;   // fd → shared_ptr<Timer>
+                                                                    // shared_ptr 保证：cancel 与 loop
+                                                                    // 并发时对象不会悬空（免 use-after-free）
+        std::mutex m_mutex;                                         // 保护 m_timers 的互斥锁
+                                                                    // （loop 线程与 addTimer/cancel
+                                                                    //   会并发访问该映射表）
 
         std::atomic_bool m_stop;          // 停止标志（true = 停止循环）
         std::once_flag m_flag;            // 保证 stopQueue 只执行一次
