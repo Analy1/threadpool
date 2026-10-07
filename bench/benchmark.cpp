@@ -39,6 +39,7 @@
 
 #include "CachedThreadPool.hpp"
 #include "FixedThreadPool.hpp"
+#include "ScheduledThreadPool.hpp"
 #include "WorkStealingThreadPool.hpp"
 
 using namespace bench;
@@ -90,6 +91,9 @@ struct Config
     int unbalancedEvery = 8;       // skewed：每 K 个任务里有一个长任务
     long long longTaskNs = 200000; // 长任务 CPU 时长（纳秒）
     double idleSeconds = 3.0;      // idle 场景的空转时长
+    long long delayMs = 20;        // timer 场景：一次性定时器的目标延迟
+    long long intervalMs = 10;     // timer 场景：周期性任务间隔
+    double timerSeconds = 1.0;     // timer 场景：周期性任务观察时长
     std::string csv;               // 结果追加写入的 CSV 路径
 };
 
@@ -642,10 +646,132 @@ static void scenarioSubmit(const Config &cfg)
     }
 }
 
+// ============================ 场景 6：定时器精度与开销 ============================
+struct TimerOutcome
+{
+    double addNs = 0;                  // 创建一个定时器的开销（timerfd_create + epoll 注册）
+    double cancelNs = 0;               // 取消一个定时器的开销
+    std::vector<double> oneshotErrUs;  // 一次性定时器 |实际触发 - 目标|
+    std::vector<double> intervalErrUs; // 周期性任务相邻间隔相对目标间隔的偏差
+    double driftUs = 0;                // 平均间隔 - 目标间隔（长期漂移）
+    double creationMs = 0;             // 创建全部定时器的总耗时
+    long long effDelayMs = 0;          // 实际使用的目标延迟（自动放大，避免被创建开销污染）
+    int fires = 0;
+};
+
+static TimerOutcome measureTimer(const Config &cfg)
+{
+    TimerOutcome r;
+    tulun::ScheduledThreadPool pool; // 内部是 timerfd + epoll 的 TimerQueue
+
+    // fd 数量有限，定时器数量封顶 500
+    const int nOnce = static_cast<int>(std::min<long long>(cfg.tasks > 5000 ? 500 : cfg.tasks, 500));
+
+    // --- 1) 创建 / 取消开销 ---
+    std::vector<tulun::TimerId> ids;
+    ids.reserve(nOnce);
+    const auto t0 = Clock::now();
+    for (int i = 0; i < nOnce; ++i)
+    {
+        ids.push_back(pool.AddRunAfter(600000, [] {})); // 10 分钟后才触发，测完立刻取消
+    }
+    const auto t1 = Clock::now();
+    for (const auto &id : ids)
+    {
+        pool.Cancel(id);
+    }
+    const auto t2 = Clock::now();
+    r.addNs = msBetween(t0, t1) * 1e6 / nOnce;
+    r.cancelNs = msBetween(t1, t2) * 1e6 / nOnce;
+    r.creationMs = msBetween(t0, t1);
+    // 创建全部定时器本身就要几十毫秒；目标延迟必须明显大于它，
+    // 否则先创建的定时器会在还没创建完时就到期，量到的“误差”其实是创建开销
+    r.effDelayMs = std::max<long long>(cfg.delayMs, static_cast<long long>(r.creationMs * 3.0) + 20);
+
+    // --- 2) 一次性定时器的延迟误差 ---
+    std::mutex m;
+    std::condition_variable cv;
+    int done = 0;
+    r.oneshotErrUs.reserve(nOnce);
+    for (int i = 0; i < nOnce; ++i)
+    {
+        // 目标时间逐个错开 1ms：否则几百个定时器同时到期，
+        // 量到的其实是 epoll 线程串行处理它们的排队时间，而不是定时器本身的精度
+        const long long when = r.effDelayMs + i;
+        const auto target = Clock::now() + std::chrono::milliseconds(when);
+        pool.AddRunAfter(static_cast<size_t>(when),
+                         [&m, &cv, &done, &r, target] {
+                             const double errUs =
+                                 std::chrono::duration<double, std::micro>(Clock::now() - target).count();
+                             {
+                                 std::lock_guard<std::mutex> g(m);
+                                 r.oneshotErrUs.push_back(std::fabs(errUs));
+                                 ++done;
+                             }
+                             cv.notify_one();
+                         });
+    }
+    {
+        std::unique_lock<std::mutex> g(m);
+        cv.wait(g, [&] { return done == nOnce; });
+    }
+
+    // --- 3) 周期性任务的间隔误差与长期漂移 ---
+    std::vector<double> fireTimes;
+    std::atomic<bool> stop{false};
+    pool.AddRunEvery(static_cast<size_t>(cfg.intervalMs), [&] {
+        if (stop.load())
+        {
+            return;
+        }
+        fireTimes.push_back(std::chrono::duration<double, std::micro>(Clock::now().time_since_epoch()).count());
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<long long>(cfg.timerSeconds * 1000.0)));
+    stop.store(true);
+
+    const double targetUs = static_cast<double>(cfg.intervalMs) * 1000.0;
+    for (size_t i = 1; i < fireTimes.size(); ++i)
+    {
+        r.intervalErrUs.push_back(fireTimes[i] - fireTimes[i - 1] - targetUs);
+    }
+    r.fires = static_cast<int>(fireTimes.size());
+    if (fireTimes.size() >= 2)
+    {
+        r.driftUs = (fireTimes.back() - fireTimes.front()) / static_cast<double>(fireTimes.size() - 1) - targetUs;
+    }
+    return r;
+}
+
+static void scenarioTimer(const Config &cfg)
+{
+    const int n = static_cast<int>(std::min<long long>(cfg.tasks > 5000 ? 500 : cfg.tasks, 500));
+    printf("\n== 定时器精度与开销（ScheduledThreadPool：timerfd + epoll）==\n");
+    printf("   一次性定时器 %d 个（目标延迟 %lldms）；周期性任务间隔 %lldms，观察 %.1f 秒\n", n, cfg.delayMs,
+           cfg.intervalMs, cfg.timerSeconds);
+    printf("   说明：目标延迟会自动放大以避免被创建耗时污染；一次性定时器的目标时间逐个错开 1ms，\n"
+           "         避免几百个定时器同时到期带来的排队效应（那测的是 epoll 线程的处理速度）\n");
+
+    const TimerOutcome o = measureTimer(cfg);
+
+    printf("创建定时器: %.0f ns/个（timerfd_create + settime + epoll_ctl）   取消: %.0f ns/个\n", o.addNs,
+           o.cancelNs);
+    printf("   创建 %d 个共耗时 %.1fms；本次一次性定时器实际目标延迟 %.0fms\n", n, o.creationMs,
+           static_cast<double>(o.effDelayMs));
+    printf("一次性延迟误差 |实际-目标|: P50 %.1fus  P90 %.1fus  P99 %.1fus  最大 %.1fus\n",
+           percentile(o.oneshotErrUs, 50), percentile(o.oneshotErrUs, 90), percentile(o.oneshotErrUs, 99),
+           maxOf(o.oneshotErrUs));
+    printf("周期性间隔误差: P50 %.1fus  P99 %.1fus  最大 %.1fus\n", percentile(o.intervalErrUs, 50),
+           percentile(o.intervalErrUs, 99), maxOf(o.intervalErrUs));
+    printf("平均间隔 - 目标间隔（漂移）: %.1fus，共触发 %d 次\n", o.driftUs, o.fires);
+
+    appendCsv("timer,scheduled,%d,%d,%lld,1,%.0f,%.1f,%.1f,%.1f,%.1f\n", cfg.threads, n, cfg.delayMs, o.addNs,
+              percentile(o.oneshotErrUs, 99), percentile(o.intervalErrUs, 99), o.driftUs, o.cancelNs);
+}
+
 // ============================ 入口 ============================
 static void usage()
 {
-    printf("用法: bench --scenario=<throughput|scaling|idle|unbalanced|submit> [选项]\n"
+    printf("用法: bench --scenario=<throughput|scaling|idle|unbalanced|submit|timer> [选项]\n"
            "  --pool=<all|fixed|cached|workstealing>  默认 all\n"
            "  --threads=N        工作线程数            默认 8\n"
            "  --tasks=N          任务数                默认 1000000\n"
@@ -657,6 +783,9 @@ static void usage()
            "  --every=N          skewed 模式下每 N 个任务一个长任务，默认 8\n"
            "  --long=NS          长任务 CPU 时长       默认 200000\n"
            "  --idle-seconds=S   idle 场景空转时长     默认 3\n"
+           "  --delay-ms=N       timer: 一次性目标延迟 默认 20\n"
+           "  --interval-ms=N    timer: 周期任务间隔   默认 10\n"
+           "  --timer-seconds=S  timer: 周期观察时长   默认 1\n"
            "  --csv=PATH         结果追加写入 CSV\n");
 }
 
@@ -721,6 +850,18 @@ static bool parseArgs(int argc, char **argv)
         else if (a.rfind("--idle-seconds=", 0) == 0)
         {
             g_cfg.idleSeconds = std::stod(value("--idle-seconds"));
+        }
+        else if (a.rfind("--delay-ms=", 0) == 0)
+        {
+            g_cfg.delayMs = std::stoll(value("--delay-ms"));
+        }
+        else if (a.rfind("--interval-ms=", 0) == 0)
+        {
+            g_cfg.intervalMs = std::stoll(value("--interval-ms"));
+        }
+        else if (a.rfind("--timer-seconds=", 0) == 0)
+        {
+            g_cfg.timerSeconds = std::stod(value("--timer-seconds"));
         }
         else if (a.rfind("--csv=", 0) == 0)
         {
@@ -795,6 +936,10 @@ int main(int argc, char **argv)
         else if (g_cfg.scenario == "submit")
         {
             scenarioSubmit(g_cfg);
+        }
+        else if (g_cfg.scenario == "timer")
+        {
+            scenarioTimer(g_cfg);
         }
         else
         {

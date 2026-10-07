@@ -102,6 +102,21 @@ namespace bench
         return (n % 2) ? v[n / 2] : (v[n / 2 - 1] + v[n / 2]) / 2.0;
     }
 
+    // 百分位（线性插值）；p 取 50/90/99 等
+    inline double percentile(std::vector<double> v, double p)
+    {
+        if (v.empty())
+        {
+            return 0.0;
+        }
+        std::sort(v.begin(), v.end());
+        const double idx = p / 100.0 * static_cast<double>(v.size() - 1);
+        const size_t lo = static_cast<size_t>(idx);
+        const size_t hi = std::min(lo + 1, v.size() - 1);
+        const double frac = idx - static_cast<double>(lo);
+        return v[lo] * (1.0 - frac) + v[hi] * frac;
+    }
+
     inline double minOf(const std::vector<double> &v)
     {
         return v.empty() ? 0.0 : *std::min_element(v.begin(), v.end());
