@@ -16,3 +16,4 @@ aux_source_directory(${PROJECT_SOURCE_DIR}/threadPool/src SRC_ThrPool)
 
 
 add_subdirectory(example)
+add_subdirectory(bench)

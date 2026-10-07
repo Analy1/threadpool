@@ -9,3 +9,8 @@ bin/
 CMakeCache.txt
 CMakeFiles/
 Makefile
+bench/baseline/
+bench/results/
+perf-out/
+perf.data*
+gmon.out
