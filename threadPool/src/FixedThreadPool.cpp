@@ -21,7 +21,7 @@ namespace tulun
             m_queue.Take(task);    // 从任务队列中获取任务
             if (m_running && task) // 如果获取到了任务，就执行任务
             {
-                LOG_INFO << "Thread task";// 线程池中的线程执行任务
+                LOG_TRACE << "Thread task";// 线程池中的线程执行任务（每任务一行，只能开 TRACE 级别看）
                 task();
             }
         }
@@ -37,7 +37,7 @@ namespace tulun
         }
     }
 
-    FixedThreadPool::FixedThreadPool(size_t m_TaskQueSize = 500, int numthreads = std::thread::hardware_concurrency())
+    FixedThreadPool::FixedThreadPool(size_t m_TaskQueSize , int numthreads)
         : m_queue(m_TaskQueSize), m_running(false)
     {
         Start(numthreads);
@@ -55,7 +55,7 @@ namespace tulun
     {
         if(m_queue.Put(std::move(task)) != 0) // 将任务添加到任务队列中
         {
-            LOG_INFO << "task()";
+            LOG_DEBUG << "task()";
             task(); // 如果添加任务失败了，就直接执行任务，避免任务丢失
         }
         
@@ -64,7 +64,7 @@ namespace tulun
     {
         if(m_queue.Put(task) != 0) // 将任务添加到任务队列中
         {
-            LOG_INFO << "task()";
+            LOG_DEBUG << "task()";
             task();
         }
     }

@@ -29,21 +29,17 @@ namespace tulun
         ScheduledThreadPool() {}
         ~ScheduledThreadPool() {}
 
-        // ========================================
+
         // 模式1：指定绝对时间执行一次
-        // ========================================
         // time：目标时间点（如 "2026-05-26 10:00:00"）
         // cb：要执行的回调函数
         // interval = 0 → 一次性定时器
         TimerId AddRunAt(const Timestamp &time, const TimerCallback &cb)
         {
-            return m_queue.addTimer(cb, time, 0);
-            //                           ↑ 0 = 不重复
+            return m_queue.addTimer(cb, time, 0); 
         }
 
-        // ========================================
         // 模式2：延迟一段时间后执行一次
-        // ========================================
         // delay：延迟多少毫秒
         // cb：要执行的回调函数
         TimerId AddRunAfter(size_t delay, const TimerCallback &cb)
@@ -55,9 +51,7 @@ namespace tulun
             return AddRunAt(time, cb);  // 复用模式1
         }
 
-        // ========================================
         // 模式3：周期性重复执行
-        // ========================================
         // interval：执行间隔（毫秒）
         // cb：要执行的回调函数
         TimerId AddRunEvery(size_t interval, const TimerCallback &cb)
@@ -67,12 +61,10 @@ namespace tulun
                 tulun::addTimeMilloc(tulun::Timestamp::Now(), interval)
             );
             return m_queue.addTimer(cb, time, interval);
-            //                           ↑ 传入了间隔 → 重复定时器
         }
 
-        // ========================================
+
         // 取消一个定时任务
-        // ========================================
         void Cancel(TimerId timerid)
         {
             m_queue.cancel(timerid);

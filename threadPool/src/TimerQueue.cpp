@@ -8,9 +8,7 @@
 
 namespace tulun
 {
-    // ============================================================
     // loop() — 核心循环，在一个独立线程中持续运行
-    // ============================================================
     void TimerQueue::loop()
     {
         while (!m_stop) // 只要没收到停止信号，就一直循环
@@ -94,9 +92,7 @@ namespace tulun
         }
     }
 
-    // ============================================================
     // init() — 初始化 epoll 并启动工作线程
-    // ============================================================
     void TimerQueue::init()
     {
         // 创建 epoll 实例
@@ -137,8 +133,6 @@ namespace tulun
             m_stop = false;
             // 启动工作线程，执行 loop()
             m_worderThread = std::thread(&TimerQueue::loop, this);
-            //                                       ↑
-            //                        成员函数指针   对象指针
         }
         catch (const std::exception &e)
         {
@@ -152,9 +146,8 @@ namespace tulun
         }
     }
 
-    // ============================================================
+
     // stopQueue() — 停止定时器队列，清理所有资源
-    // ============================================================
     void TimerQueue::stopQueue()
     {
         // 步骤1：设置停止标志
@@ -194,9 +187,7 @@ namespace tulun
         m_epollfd = -1;
     }
 
-    // ============================================================
-    // 构造函数
-    // ============================================================
+
     TimerQueue::TimerQueue(int timeout)
         : m_epollfd(-1) // 还没创建 epoll
           ,
@@ -210,17 +201,13 @@ namespace tulun
         init();                     // 创建 epoll + 启动 loop 线程
     }
 
-    // ============================================================
-    // 析构函数
-    // ============================================================
     TimerQueue::~TimerQueue()
     {
         stop(); // 安全停止
     }
 
-    // ============================================================
+
     // addTimer() — 添加一个定时器
-    // ============================================================
     tulun::TimerId TimerQueue::addTimer(const TimerCallback &cb, // 回调
                                         const Timestamp &when,   // 到期时间
                                         size_t interval)         // 重复间隔(ms)
@@ -234,7 +221,7 @@ namespace tulun
         // 步骤2：初始化定时器
         if (!ptimer->init(cb, when, interval))
         {
-            // 初始化失败（比如 timerfd_create 失败）
+            // 初始化失败
             return ret; // shared_ptr 析构自动释放 Timer
         }
 
@@ -258,7 +245,6 @@ namespace tulun
         {
             std::lock_guard<std::mutex> locker(m_mutex);
             m_timers[ptimer->getTimerFd()] = ptimer;
-            //        ↑ key = fd          ↑ value = shared_ptr<Timer>
         }
 
         // 步骤6：返回 TimerId
@@ -267,9 +253,8 @@ namespace tulun
         return ret;
     }
 
-    // ============================================================
+
     // cancel() — 取消一个定时器
-    // ============================================================
     void TimerQueue::cancel(TimerId timerid)
     {
         // 先加锁把 shared_ptr 从映射表取出（拷贝一份引用）
@@ -294,16 +279,12 @@ namespace tulun
         // Timer 对象在 timer 离开作用域时析构（析构里再调 closeTimer 是空操作）
     }
 
-    // ============================================================
     // stop() — 停止定时器队列（保证只执行一次）
-    // ============================================================
     void TimerQueue::stop()
     {
         // std::call_once：保证 stopQueue 只会被调用一次
         // 即使多个线程同时调用 stop()，也只会执行一次清理
         std::call_once(m_flag, &TimerQueue::stopQueue, this);
-        //                   ↑              ↑            ↑
-        //               once_flag      成员函数      对象指针
     }
 
 } // namespace tulun

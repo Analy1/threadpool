@@ -1,7 +1,8 @@
 
 
 #include "Timer.hpp"
-#include <sys/timerfd.h>
+#include <sys/timerfd.h> //它提供了一组 API，让你把一个"定时器"变成一个文件描述符，
+                         //从而可以用 read()、poll()、epoll()、select() 等标准的 I/O 多路复用机制来等待定时器超时。
 #include <errno.h>
 #include <string.h>
 #include "Logger.hpp"
@@ -12,11 +13,16 @@ namespace tulun
     static struct timespec howMuchTimeFromNow(const Timestamp &when)
     {
         // 1. 计算目标时间与当前时间的差值（微秒）
+        /*
+        when.getMicro()：目标时间的微秒表示
+        Timestamp::Now().getMicro()：当前时间的微秒表示
+        相减得到"还有多少微秒"
+        */
         int64_t microseconds = when.getMicro() - Timestamp::Now().getMicro();
-    
+
         // 2. 防止时间已过：如果差值小于100微秒，强制设为100微秒
         //    因为timerfd不允许设为0或过去的时间
-        if(microseconds < 100)
+        if (microseconds < 100)
         {
             microseconds = 100;
         }
@@ -29,9 +35,18 @@ namespace tulun
     }
 
     // ====== 设置底层 timerfd 的到期时间 ======
+    /*
+    把 C++ 对象里存的状态（间隔 m_interval、到期时间 m_expiration）翻译成 itimerspec，然后交给系统调用。
+    */
     bool Timer::settimer()
     {
         bool ret = true;
+        /*
+        struct itimerspec {
+        struct timespec it_interval;  // 周期
+        struct timespec it_value;     // 首次超时-表示"从设定时刻起，多久后第一次触发"
+        };
+        */
         struct itimerspec new_value = {};
         // 重复间隔：毫秒 → 秒 + 纳秒
         new_value.it_interval.tv_sec = (m_interval / 1000);

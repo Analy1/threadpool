@@ -100,7 +100,7 @@ namespace tulun
     {
         if (m_queue.Put(std::forward<Task>(task)) != 0)
         {
-            LOG_INFO << "task()";
+            LOG_DEBUG << "task()";
             task();
         }
         newThread();// 创建新线程，执行任务
@@ -109,7 +109,7 @@ namespace tulun
     {
         if (m_queue.Put(task) != 0)
         {
-            LOG_INFO << "task()";
+            LOG_DEBUG << "task()";
             task();
         }
         newThread(); // 创建新线程，执行任务

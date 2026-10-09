@@ -15,7 +15,7 @@ namespace tulun
     class Timer
     {
     public:
-        int m_timerfd; // 定时器文件描述符（timerfd_create 创建）
+        int m_timerfd; // 定时器文件描述符（timerfd_create 创建）一个描述符对应一个回调函数（下面的）
                        // 可通过 epoll/select 监听，到期时可读
 
         TimerCallback m_callback; // 定时器到期后执行的回调函数
@@ -50,6 +50,6 @@ namespace tulun
         bool isRepeat() const;
 
     };
-    using TimerId = std::pair<int, Timer *>;
+    using TimerId = std::pair<int, Timer *>;// 定时器 ID（定时器文件描述符 + Timer*）
 
 }

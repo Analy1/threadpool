@@ -41,7 +41,7 @@ namespace tulun
         void StopThreadGroup(); // 停止线程池
 
     public:
-        FixedThreadPool(size_t m_TaskQueSize, int numthreads);
+        FixedThreadPool(size_t m_TaskQueSize = 500, int numthreads = std::thread::hardware_concurrency());
 
         ~FixedThreadPool();
         void Stop();

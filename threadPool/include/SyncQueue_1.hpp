@@ -47,15 +47,6 @@ namespace tulun
         int Add(F &&task) // 添加任务
         {
             std::unique_lock<std::mutex> locker(m_mutex);
-            // while (!m_needStop && IsFull())
-            // {
-            //     auto tag = m_notFull.wait_for(locker,std::chrono::milliseconds(m_waitTime)); // 队列满了，生产者等待
-            //     if(tag == std::cv_status::timeout && IsFull())
-            //     {
-
-            //         return 1; // 添加任务超时，返回错误码
-            //     }
-            // }
             auto tag = m_notFull.wait_for(locker,
                                           std::chrono::milliseconds(w_waitTime),
                                           [this]() -> bool
